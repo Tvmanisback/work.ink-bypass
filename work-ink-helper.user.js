@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Work.ink Helper
+// @name         Worklink Bypasser
 // @namespace    https://github.com/Tvmanisback/work.ink-bypass
 // @version      1.0.0
 // @description  Adds a small Work.ink button and popup that sends the current link to BypassLinks.
@@ -44,14 +44,14 @@
   const root = document.createElement('div');
   root.id = ROOT_ID;
   root.innerHTML = `
-    <section id="tvwi-panel" role="dialog" aria-modal="false" aria-label="Work.ink helper">
-      <div id="tvwi-head"><div id="tvwi-title">Work.ink Helper</div><button id="tvwi-close" type="button" aria-label="Close">×</button></div>
+    <section id="tvwi-panel" role="dialog" aria-modal="false" aria-label="Worklink Bypasser">
+      <div id="tvwi-head"><div id="tvwi-title">Worklink Bypasser</div><button id="tvwi-close" type="button" aria-label="Close">×</button></div>
       <p id="tvwi-desc">Your current Work.ink address is detected automatically.</p>
       <textarea id="tvwi-url" readonly aria-label="Detected Work.ink URL"></textarea>
       <button id="tvwi-bypass" type="button">Bypass link ↗</button>
       <p id="tvwi-note">Opens BypassLink in a new tab. The resolver's result is shown there; this script cannot read another site's result page directly.</p>
     </section>
-    <button id="tvwi-fab" type="button" aria-label="Open Work.ink Helper" title="Work.ink Helper">${icon}</button>
+    <button id="tvwi-fab" type="button" aria-label="Open Work.ink Helper" title="Worklink Bypasser">${icon}</button>
   `;
   document.documentElement.appendChild(root);
 
