@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         worklink-bypasser
 // @namespace    https://github.com/Tvmanisback/work.ink-bypass
-// @version      2.0.0
-// @description  Finds destination URLs already exposed by the current Work.ink page.
+// @version      2.1.0
+// @description  Automatically detects destination links when Work.ink exposes them in the page.
 // @match        https://work.ink/*
 // @match        https://*.work.ink/*
 // @run-at       document-idle
@@ -47,10 +47,10 @@
       <div id="wlb-head"><div id="wlb-title">worklink-bypasser</div><button id="wlb-close" type="button" aria-label="Close">×</button></div>
       <p id="wlb-desc">Current Work.ink link</p>
       <textarea id="wlb-current" readonly></textarea>
-      <button id="wlb-find" type="button">Find destination</button>
-      <p id="wlb-status" aria-live="polite">Press the button to check for destination URLs exposed by this page.</p>
+      <button id="wlb-find" type="button">Check again</button>
+      <p id="wlb-status" aria-live="polite">Watching this page for a destination link…</p>
       <div id="wlb-results"></div>
-      <p id="wlb-note">This checks links and page data available in your browser. It does not defeat Work.ink unlock steps, CAPTCHA, or access controls; if Work.ink has not exposed the destination yet, complete its official steps first.</p>
+      <p id="wlb-note">Automatically detects destination URLs once the page exposes them (including after you finish the normal steps). It does not skip unlock steps or defeat CAPTCHA/access controls.</p>
     </section>
     <button id="wlb-fab" type="button" aria-label="Open worklink-bypasser" title="worklink-bypasser">${icon}</button>
   `;
@@ -60,23 +60,17 @@
   const currentBox = root.querySelector('#wlb-current');
   const status = root.querySelector('#wlb-status');
   const results = root.querySelector('#wlb-results');
-
-  function currentUrl() {
-    return window.location.href;
-  }
-
-  function openPanel() {
-    currentBox.value = currentUrl();
-    panel.classList.add('wlb-open');
-  }
+  const known = new Set();
+  let lastRender = '';
 
   function addCandidate(set, raw) {
     if (typeof raw !== 'string' || !raw.trim()) return;
     try {
-      const url = new URL(raw.trim(), location.href);
+      const url = new URL(raw.trim().replace(/\\u0026/gi, '&').replace(/\\\//g, '/'), location.href);
       if (!/^https?:$/.test(url.protocol)) return;
       if (url.hostname === 'work.ink' || url.hostname.endsWith('.work.ink')) return;
       if (url.hostname === location.hostname) return;
+      if (/\.(?:png|jpe?g|gif|webp|svg|css|js|woff2?|ico)(?:$|\?)/i.test(url.pathname)) return;
       set.add(url.href);
     } catch (_) {}
   }
@@ -84,11 +78,11 @@
   function scanPage() {
     const found = new Set();
 
-    document.querySelectorAll('a[href],area[href]').forEach(el => addCandidate(found, el.getAttribute('href')));
-    document.querySelectorAll('[data-href],[data-url],[data-destination]').forEach(el => {
-      addCandidate(found, el.getAttribute('data-href'));
-      addCandidate(found, el.getAttribute('data-url'));
-      addCandidate(found, el.getAttribute('data-destination'));
+    document.querySelectorAll('a[href],area[href]').forEach(el => addCandidate(found, el.href || el.getAttribute('href')));
+    document.querySelectorAll('*').forEach(el => {
+      for (const attr of ['data-href','data-url','data-destination','data-redirect','href','action']) {
+        if (el.hasAttribute(attr)) addCandidate(found, el.getAttribute(attr));
+      }
     });
 
     document.querySelectorAll('meta[http-equiv="refresh" i]').forEach(meta => {
@@ -96,14 +90,73 @@
       if (match) addCandidate(found, match[1]);
     });
 
-    // Inspect embedded JSON/page state for absolute external URLs, without executing it.
-    document.querySelectorAll('script[type="application/json"],script#__NEXT_DATA__').forEach(script => {
-      const text = script.textContent || '';
-      const matches = text.match(/https?:\\?\/\\?\/[a-z0-9.-]+(?::\d+)?[^\s"'<>\\]*/gi) || [];
-      for (const value of matches) addCandidate(found, value.replace(/\\\//g, '/').replace(/\\u0026/g, '&'));
+    // Read URLs from page data only; do not call hidden APIs or alter unlock behavior.
+    document.querySelectorAll('script').forEach(script => {
+      const type = (script.getAttribute('type') || '').toLowerCase();
+      if (type !== 'application/json' && script.id !== '__NEXT_DATA__') return;
+      const source = script.textContent || '';
+      const matches = source.match(/https?:\\?\/\\?\/[a-z0-9.-]+(?::\d+)?[^\s"'<>\\]*/gi) || [];
+      for (const value of matches) addCandidate(found, value);
     });
 
     return [...found];
+  }
+
+  function render(urls) {
+    const signature = urls.join('\n');
+    if (signature === lastRender) return;
+    lastRender = signature;
+    results.replaceChildren();
+
+    if (!urls.length) {
+      status.textContent = 'Still watching. Finish Work.ink’s normal steps; the destination will appear here if the page exposes it.';
+      return;
+    }
+
+    status.textContent = `Destination candidate${urls.length === 1 ? '' : 's'} detected:`;
+    for (const url of urls) {
+      const row = document.createElement('div');
+      row.style.display = 'grid';
+      row.style.gridTemplateColumns = '1fr auto';
+      row.style.gap = '8px';
+      row.style.alignItems = 'center';
+
+      const link = document.createElement('a');
+      link.className = 'wlb-result';
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = url;
+
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.textContent = 'Copy';
+      copy.style.cssText = 'border:0;border-radius:8px;padding:8px;background:#334155;color:#fff';
+      copy.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          copy.textContent = 'Copied';
+        } catch (_) {
+          copy.textContent = 'Copy blocked';
+        }
+      });
+
+      row.append(link, copy);
+      results.appendChild(row);
+    }
+  }
+
+  function check() {
+    currentBox.value = location.href;
+    const urls = scanPage();
+    urls.forEach(url => known.add(url));
+    render([...known]);
+  }
+
+  function openPanel() {
+    currentBox.value = location.href;
+    panel.classList.add('wlb-open');
+    check();
   }
 
   root.querySelector('#wlb-fab').addEventListener('click', () => {
@@ -111,26 +164,40 @@
     else openPanel();
   });
   root.querySelector('#wlb-close').addEventListener('click', () => panel.classList.remove('wlb-open'));
+  root.querySelector('#wlb-find').addEventListener('click', check);
 
-  root.querySelector('#wlb-find').addEventListener('click', () => {
-    currentBox.value = currentUrl();
-    results.replaceChildren();
-    const urls = scanPage();
-
-    if (!urls.length) {
-      status.textContent = 'No destination URL is exposed on this page yet. Work.ink may only reveal it after its normal unlock process.';
-      return;
-    }
-
-    status.textContent = `Found ${urls.length} possible destination link${urls.length === 1 ? '' : 's'}:`;
-    for (const url of urls) {
-      const link = document.createElement('a');
-      link.className = 'wlb-result';
-      link.href = url;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.textContent = url;
-      results.appendChild(link);
+  // Detect links inserted later by the page after its normal unlock flow.
+  const observer = new MutationObserver(() => {
+    if (panel.classList.contains('wlb-open')) check();
+    else {
+      const urls = scanPage();
+      urls.forEach(url => known.add(url));
+      if (urls.length) {
+        lastRender = '';
+        status.textContent = 'Destination detected. Open the button to view it.';
+      }
     }
   });
+  observer.observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['href','data-href','data-url','data-destination','data-redirect','content']
+  });
+
+  // A few delayed checks catch page state populated after initial rendering.
+  let checks = 0;
+  const timer = setInterval(() => {
+    const urls = scanPage();
+    urls.forEach(url => known.add(url));
+    if (urls.length) {
+      status.textContent = 'Destination detected. Open the button to view it.';
+      clearInterval(timer);
+    }
+    if (++checks >= 120) clearInterval(timer);
+  }, 1000);
+
+  window.addEventListener('pageshow', check);
+  window.addEventListener('popstate', check);
+  window.addEventListener('hashchange', check);
 })();
